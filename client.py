@@ -3,7 +3,7 @@ import json
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
-# הגדרות השרת
+# server
 HOST = "127.0.0.1"
 PORT = 12345
 

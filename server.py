@@ -13,7 +13,7 @@ PORT = 12345
 
 #Generate a pair of public and private keys for the server with the RSA algorithm.
 private_key_of_server = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-#The public exponent, 65537, is a prime number and is a standart choice for public exponent.
+#The public exponent, 65537, is a prime number and is a standard choice for public exponent.
 #The key size 2048 is a large key size and offers a good security.
 
 public_key_of_server = private_key_of_server.public_key()   #Derive the public key from the private key.
@@ -21,7 +21,7 @@ public_key_of_server = private_key_of_server.public_key()   #Derive the public k
 #We will save the server's public key into a PEM file.
 with open("public_key_of_server.pem", "wb") as public_key_file:
     public_key_file.write(public_key_of_server.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
-#and print the name of this file, the server's public key:
+#and print the file name for clarification:
 print("The public key of the server is saved in this file: 'public_key_of_server.pem'.")
 
 #This will be the main loop of code of the server.

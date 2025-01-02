@@ -52,6 +52,14 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
                 if message["type"] == "register":   #processing the registration details
                     client_id = message["client_id"]    #the phone number of the client
                     public_key_pem = message["public_key"].encode() #the public key of the client
+
+                    #For the simplicity,the MMN16's requirment is that the server
+                    #won't contain more than 10 clients.
+                    if len(clients_data_base) >= 10:
+                        client_socket.sendall(b"Registration failed. Cause: server is full.")
+                        print(f"Sorry, client {client_id}. Your registration attempt rejected because the server is full.")
+                        continue
+
                     #here we will save the client's data to the dictionary we created at the beginning.
                     #we will store the client's public key and the list of messages sent to this client:
                     clients_data_base[client_id] = {"public_key": public_key_pem, "messages": []}

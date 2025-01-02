@@ -37,6 +37,42 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
         #The server will enter an infinite loop where he will listen and wait for incoming connections from the client.
         #client_address contains the client's IP and port number.
         #client_socket is the specific connection to the client.
-        client_socket, client_address = server_socket.accept()
+        client_socket, client_address = server_socket.accept()  #the client connects.
         with client_socket:
-            print(f"connected by: {client_address}.")
+            print(f"connected by: {client_address}.")   #A message that indicated that the client is connected + his address.
+            #the client socket will be automatically closed when the block ends.
+            try:
+                received_data = client_socket.recv(4096)    #wait for client's data. 4096 - the number of bytes to read.
+                if not received_data:   #if the client disconnects, so end the loop for this client.
+                    break
+
+                #analyzing the data:
+                message = json.loads(received_data.decode())    #convert the data to a dictionary.
+                #creating the structure of the data:
+                if message["type"] == "register":   #processing the registration details
+                    client_id = message["client_id"]    #the phone number of the client
+                    public_key_pem = message["public_key"].encode() #the public key of the client
+                    #here we will save the client's data to the dictionary we created at the beginning.
+                    #we will store the client's public key and the list of messages sent to this client:
+                    clients_data_base[client_id] = {"public_key": public_key_pem, "messages": []}
+
+                    #save the public key to PEM file:
+                    with open(f"public_key_of_client_{client_id}.pem", "wb") as client_key_file:
+                        client_key_file.write(public_key_pem)
+
+                    print(f"The client that is registered: {client_id}")
+                    #confirming that the server processed the registration:
+                    client_socket.sendall(b"The registration is successful!")
+
+                #In the case that the received message isn't recognized - the server will print it:
+                else:
+                    client_socket.sendall(b"The request is unknown!")
+
+            #error handling:
+            except Exception as e:
+                print(f"Exception occured: {e}")
+                client_socket.sendall(b"There is an error...")
+
+
+
+

@@ -108,10 +108,14 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
 
                     #Gnerating a random 6 character OTP:
                     otp = ''.join(str(random.randint(0, 9)) for i in range(6))
+                    #Print the OTP:
+                    print(f"The OTP that was generated for {client_id} is: {otp}")
 
                     #The OTP that we generated is sent through secure channel
-                    #using the function we created:
+                    #using the function we created to the client:
                     SendBySecureChanel(client_id, otp)
+                    client_socket.sendall(otp.encode())
+                    client_socket.sendall(b"The registration was successful!")
 
                     #here we will save the client's data to the dictionary we created at the beginning.
                     #we will store the client's public key and the list of messages sent to this client:

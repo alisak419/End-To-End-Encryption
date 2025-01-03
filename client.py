@@ -73,21 +73,19 @@ try:
                                                                             #into bytes. Then it all sends to the server using TCP.
         print("Good! The registration message has been sent.")
 
+        #Getting OTP from the server:
+        otp_answer = client_socket.recv(4096).decode()  #Reading the OTP
+        print(f"The OTP we got from the server is this: {otp_answer}")
+
         #Receiving the server's response after the client's registration request:
         response = client_socket.recv(4096).decode()    #the data from the server is received over the socket connection,
                                                         #the received binary data is in bytes, so it's converted into a string
                                                         #format using UTF-8 encoding.
+        print(f"The server's response is: {response}")
 
-        #displaying the server's response:
-        print(f"The server's response is: {response}.")
-
-        #Here we handle "failed" response from the server.
         res = response.lower()
-        if "failed" in res:
-            print("Sorry, the registration failed... You can try again later.")
-        else:       #receiving OTP from the server
-            otp_answer = client_socket.recv(4096).decode()
-            print(f"The OTP received from the server is {otp_answer}.")
+        if "successful" in res:
+            print("Good, the registration complited.")
 
             #Derive AES 256 bit key using KDF.
             aes_key = derive_aes_from_otp(otp_answer)
@@ -102,6 +100,8 @@ try:
             #after this message is created, it needs to be sent to the server so that he will know the client is legit.
             client_socket.sendall(json.dumps(authentication_message).encode())
             print("Awesome... the client is legit. The authentication message has been sent.")
+        else:
+            print("ouch... The registration has failed.")
 
 
 

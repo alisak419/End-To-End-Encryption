@@ -1,11 +1,11 @@
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 import json
 import socket
 
-from cryptography.hazmat.primitives.ciphers import Cipher
 
 #First of all, we will create a dictionary that will act as our database.
 #This database will store all the client's data, including public keys, pending messages, connection status.
@@ -50,6 +50,20 @@ def decrypt_message(cipher_text):
     return text.decode().strip()
 
 #A function that generates HMAC, we will use a key derived from the AES key.
+def hmac_generator(message):
+    h = hmac.HMAC(AES_key, hashes.SHA256())
+    h.update(message)
+    return h.finalize()
+
+#Verify HMAC:
+def hmac_verifying(message, provided_hmac):
+    h = hmac.HMAC(AES_key, hashes.SHA256())
+    h.update(message)
+    try:
+        h.verify(provided_hmac)
+        return True
+    except:
+        return False
 
 
 
@@ -73,34 +87,11 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
             try:
                 received_data = client_socket.recv(4096)    #wait for client's data. 4096 - the number of bytes to read.
                 if not received_data:   #if the client disconnects, so end the loop for this client.
-                    break
-
-                #analyzing the data:
-                try:
-                    message = json.loads(received_data.decode())    #convert the data to a dictionary.
-                #this error appears if the data is malformed or incomplete, or something is missing in JSON syntax.
-                except json.JSONDecodeError:
-                    client_socket.sendall(b"invalid format of the message.")
-                    print("The format that was received is invalid.")
-
-                #Ensure that the "type" field is in the message:
-                #critical because it indicates the purpose of the message, if it's registration or just sending message.
-                if "type" not in message:
-                    client_socket.sendall(b"The 'type' field in the message is missing.")
-                    print("The 'type' field is missing.")
                     continue
-
-
+                message = json.loads(received_data.decode())  # convert the data to a dictionary.
 
                 #creating the structure of the data:
                 if message["type"] == "register":  #the type needs to be a registration request.
-                    #The client's phone number and public key also need to be in the message:
-                    if "client_id" not in message or "public_key" not in message:
-                        #Sending the error responses:
-                        client_socket.sendall(b"The 'client_id' and 'public_key' fields are missing.")
-                        print("Attention! The 'client_id' and 'public_key' fields are missing.")
-                        continue
-
                     client_id = message["client_id"]    #the phone number of the client
                     public_key_pem = message["public_key"].encode() #the public key of the client
 
@@ -152,7 +143,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
             #error handling:
             except Exception as e:
                 print(f"Exception occured: {e}")
-                client_socket.sendall(b"There is an error...")
+
 
 
 

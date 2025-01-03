@@ -5,6 +5,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 import json
 import socket
+import random
 
 
 #First of all, we will create a dictionary that will act as our database.
@@ -65,7 +66,10 @@ def hmac_verifying(message, provided_hmac):
     except:
         return False
 
-
+#A function for sending an OTP via secure channel -
+#as MMN 16 says, we can assume already that the channel is secure.
+def SendBySecureChanel(client_id, otp):
+    print(f"The OTP '{otp} is sending securely to '{client_id}'.")
 
 #This will be the main loop of code of the server.
 #Starting the server:
@@ -95,16 +99,23 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
                     client_id = message["client_id"]    #the phone number of the client
                     public_key_pem = message["public_key"].encode() #the public key of the client
 
-                    #For the simplicity,the MMN16's requirment is that the server
+                    #MMN16's requirment is that the server
                     #won't contain more than 10 clients.
                     if len(clients_data_base) >= 10:
                         client_socket.sendall(b"Registration failed. Cause: server is full.")
                         print(f"Sorry, client {client_id}. Your registration attempt rejected because the server is full.")
                         continue
 
+                    #Gnerating a random 6 character OTP:
+                    otp = ''.join(str(random.randint(0, 9)) for i in range(6))
+
+                    #The OTP that we generated is sent through secure channel
+                    #using the function we created:
+                    SendBySecureChanel(client_id, otp)
+
                     #here we will save the client's data to the dictionary we created at the beginning.
                     #we will store the client's public key and the list of messages sent to this client:
-                    clients_data_base[client_id] = {"public_key": public_key_pem, "messages": []}
+                    clients_data_base[client_id] = {"public_key": public_key_pem, "messages": [], "otp": otp}
 
                     #save the public key to PEM file:
                     with open(f"public_key_of_client_{client_id}.pem", "wb") as client_key_file:

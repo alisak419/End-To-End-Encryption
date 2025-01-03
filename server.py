@@ -49,11 +49,13 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
                 #analyzing the data:
                 try:
                     message = json.loads(received_data.decode())    #convert the data to a dictionary.
+                #this error appears if the data is malformed or incomplete, or something is missing in JSON syntax.
                 except json.JSONDecodeError:
                     client_socket.sendall(b"invalid format of the message.")
                     print("The format that was received is invalid.")
 
-                #validate the message structure:
+                #Ensure that the "type" field is in the message:
+                #critical because it indicates the purpose of the message, if it's registration or just sending message.
                 if "type" not in message:
                     client_socket.sendall(b"The 'type' field in the message is missing.")
                     print("The 'type' field is missing.")
@@ -62,8 +64,10 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
 
 
                 #creating the structure of the data:
-                if message["type"] == "register":   #processing the registration details
+                if message["type"] == "register":  #the type needs to be a registration request.
+                    #The client's phone number and public key also need to be in the message:
                     if "client_id" not in message or "public_key" not in message:
+                        #Sending the error responses:
                         client_socket.sendall(b"The 'client_id' and 'public_key' fields are missing.")
                         print("Attention! The 'client_id' and 'public_key' fields are missing.")
                         continue

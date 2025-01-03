@@ -2,6 +2,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 import json
 import socket
+import os
+import base64
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.asymmetric import padding
+
 
 #We will define a local IP address. The client and the server will operate on the same computer.
 HOST = "127.0.0.1"
@@ -23,6 +30,27 @@ with open(f"public_key_of_client_{client_id}.pem", "wb") as public_key_file:
 
 #and print the name of the file for clarification:
 print(f"The public key of the client saved as: 'public_key_of_client_{client_id}.pem'.")
+
+#This function derives AES key from OTP with HKDF:
+def derive_aes_from_otp(otp):
+    otp_bytes = otp.encode()
+    derived_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"E2EE").derive(otp_bytes)
+    return derived_key
+
+#This function encrypts messages with AES:
+def encrypt_message(message, AES_key):
+    iv = os.urandom(16)
+    cipher = Cipher(algorithms.AES(AES_key), modes.CBC(iv))
+    encryptor = cipher.encryptor()
+    text_with_padding = message + ' ' * (16-len(message) % 16)
+    cipher_text = encryptor.update(text_with_padding.encode()) + encryptor.finalize()
+    return base64.b64encode(iv + cipher_text).decode()
+
+#This function signs messages with the private key:
+def sign_message(message, private_key):
+    signature = private_key.sign(message.encode(), padding.PKCS1v15(), hashes.SHA256(), hashes.SHA256())
+    return base64.b64encode(signature).decode()
+
 
 #Establishing a connection with the server:
 try:
@@ -57,11 +85,26 @@ try:
         res = response.lower()
         if "failed" in res:
             print("Sorry, the registration failed... You can try again later.")
+        else:       #receiving OTP from the server
+            otp_answer = client_socket.recv(4096).decode()
+            print(f"The OTP received from the server is {otp_answer}.")
 
-#If the client attempts to connect to the server but the server is unreachble/not running/no ports listening,
-#the "connection refused" error will occur:
-except ConnectionRefusedError:
-    print("Connection failed. Please check if the server is running.")
+            #Derive AES 256 bit key using KDF.
+            aes_key = derive_aes_from_otp(otp_answer)
+            print("Awesome! the AES key derived successfully with the KDF.")
+
+            #Authentication message to ensute the client is okay to interact securely with the server.
+            #The server needs to know that the client is genuinely the one the server itself registered.
+            auth = "Authentication data"
+            encryped_authentication_message = encrypt_message(auth, aes_key)
+            authentication_message = {"type": "authenticate", "client_id": client_id, "auth_data": encryped_authentication_message}
+
+            #after this message is created, it needs to be sent to the server so that he will know the client is legit.
+            client_socket.sendall(json.dumps(authentication_message).encode())
+            print("Awesome... the client is legit. The authentication message has been sent.")
+
+
+
 except Exception as e:
     print(f"Something went wrong. {e}")
 

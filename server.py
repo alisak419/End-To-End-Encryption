@@ -72,6 +72,28 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
                     #confirming that the server processed the registration:
                     client_socket.sendall(b"The registration is successful!")
 
+                #Checking the message type-"send_message" type is a type of message the client sends to the server.
+                elif message["type"] == "send_message":
+                    #extracting the details of the message:
+                    sender_id = message["sender_id"]
+                    receiver_id = message["receiver_id"]
+                    text_message = message["message"]
+
+                    #checking if the client exists in the server's data base:
+                    if receiver_id in clients_data_base:
+                        # the client exists. The message is saved in the receiver's message queue.
+                        #The message is added to the receiver's list of pending messages:
+                        clients_data_base[receiver_id]["messages"].append({"from":sender_id, "message":text_message})
+                        client_socket.sendall(b"The message is sent.")
+                        #A confirmation is sent to the client to acknowledge that the delivery was succesful:
+                        print(f"The message is sent from {sender_id} to {receiver_id} and is stored!")
+
+                    else:       #the receiver doesn't exist.
+                        client_socket.sendall(b"The receiver was not found...")
+                        #The sender receives a respond that the receiver was not found:
+                        print(f"Failed to send message from {sender_id} to {receiver_id}: receiver not found.")
+
+
                 #In the case that the received message isn't recognized - the server will print it:
                 else:
                     client_socket.sendall(b"The request is unknown!")

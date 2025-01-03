@@ -1,7 +1,11 @@
+import os
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 import json
 import socket
+
+from cryptography.hazmat.primitives.ciphers import Cipher
 
 #First of all, we will create a dictionary that will act as our database.
 #This database will store all the client's data, including public keys, pending messages, connection status.
@@ -23,6 +27,31 @@ with open("public_key_of_server.pem", "wb") as public_key_file:
     public_key_file.write(public_key_of_server.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
 #and print the file name for clarification:
 print("The public key of the server is saved in this file: 'public_key_of_server.pem'.")
+
+#Creating AES key for symmetric encryption:
+AES_key = os.urandom(32)    #using a key in size 256-bit
+
+#Defining a function that will do symmetric encryption: AES-CBC-256
+def encrypt_message(text):
+    iv = os.urandom(16) #initialization vector
+    cipher = Cipher(algorithms.AES(AES_key), modes.CBC(iv))
+    encryptor = cipher.encryptor()
+    text_with_padding = text + ' ' * (16 - len(text) % 16)  #padding
+    cipher_text = encryptor.update(text_with_padding.encode()) + encryptor.finalize()
+    return cipher_text + iv     #the final encrypted message
+
+#A function that decrypts the messages using AES-CBC-256:
+def decrypt_message(cipher_text):
+    iv = cipher_text[:16]
+    real_cipher_text = cipher_text[16:]
+    cipher = Cipher(algorithms.AES(AES_key), modes.CBC(iv))
+    decryptor = cipher.decryptor()
+    text = decryptor.update(real_cipher_text) + decryptor.finalize()
+    return text.decode().strip()
+
+#A function that generates HMAC, we will use a key derived from the AES key.
+
+
 
 #This will be the main loop of code of the server.
 #Starting the server:

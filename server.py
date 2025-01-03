@@ -47,9 +47,27 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
                     break
 
                 #analyzing the data:
-                message = json.loads(received_data.decode())    #convert the data to a dictionary.
+                try:
+                    message = json.loads(received_data.decode())    #convert the data to a dictionary.
+                except json.JSONDecodeError:
+                    client_socket.sendall(b"invalid format of the message.")
+                    print("The format that was received is invalid.")
+
+                #validate the message structure:
+                if "type" not in message:
+                    client_socket.sendall(b"The 'type' field in the message is missing.")
+                    print("The 'type' field is missing.")
+                    continue
+
+
+
                 #creating the structure of the data:
                 if message["type"] == "register":   #processing the registration details
+                    if "client_id" not in message or "public_key" not in message:
+                        client_socket.sendall(b"The 'client_id' and 'public_key' fields are missing.")
+                        print("Attention! The 'client_id' and 'public_key' fields are missing.")
+                        continue
+
                     client_id = message["client_id"]    #the phone number of the client
                     public_key_pem = message["public_key"].encode() #the public key of the client
 

@@ -97,13 +97,13 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
                 if message["type"] == "authentication":
                     client_id = message["client_id"]
 
-                    # משתמשים בפונקציה החדשה כדי לקבל, לאמת ולפענח את ההודעה
+                    # use this function to receive ' verify and decode the message
                     decrypted_message = receive_and_decrypt_message(client_socket, AES_key, AES_key)
 
                     if decrypted_message:
                         print(f"Decrypted message: {decrypted_message}")
 
-                        #use the function to receive, verify and decode the message
+                        # if the decoding succeed connect the user
                         clients_data_base[client_id]["status"] = "connected"
                         client_socket.sendall(b"Authentication successful, you are now connected.")
                         print(f"client {client_id} has been authenticated and connected.")

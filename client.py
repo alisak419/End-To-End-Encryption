@@ -36,6 +36,14 @@ def derive_aes_from_otp(otp):
     otp_bytes = otp.encode()
     derived_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"E2EE").derive(otp_bytes)
     return derived_key
+#Creat an encryptrd messaeg with HMAC
+def send_secure_message(message):
+    encrypted_and_send_message(client_socket, aes_key, hmac_key, message)
+
+    #send a message to the server
+    secure_message = "This is a secure message."
+    send_secure_message(secure_message)
+    print("An encrypted message is send")
 
 #This function encrypts messages with AES:
 def encrypt_message(message, AES_key):

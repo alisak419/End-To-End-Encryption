@@ -1,0 +1,3 @@
+# Ignoring sensitive keys and environment files
+*.pem
+venv/

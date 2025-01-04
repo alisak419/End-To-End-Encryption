@@ -93,6 +93,27 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Cre
                     continue
                 message = json.loads(received_data.decode())  # convert the data to a dictionary.
 
+                 # Check if the message is authentication
+                if message["type"] == "authentication":
+                    client_id = message["client_id"]
+                    encrypted_message = message["encrypted_message"].encode()  # The encrypted message that the client sends
+                    received_hmac = message["hmac"].encode()
+
+                    #decrypt the message with AES
+                    decrypted_message = decrypt_message(encrypted_message)
+                    print(f"Decrypted message: {decrypted_message}")
+
+                    #HMAC verification
+                    if hmac_verifying(decrypted_message.encode(), received_hmac):
+                        #change the status to connect if the HMAC is match
+                        clients_data_base[client_id]["status"] = "connected"
+                        client_socket.sendall(b"Authentication successful' you are now connected.")
+                        print(f"client {client_id} has been authenticated and connected.")
+
+                    else:
+                        client_socket.sendall(b"Authentication failed. Invalid HMAC")
+                        print((f"Authentication failed for client {client_id}."))
+
                 #creating the structure of the data:
                 if message["type"] == "register":  #the type needs to be a registration request.
                     client_id = message["client_id"]    #the phone number of the client

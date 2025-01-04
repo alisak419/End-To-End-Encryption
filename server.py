@@ -23,7 +23,7 @@ private_key_of_server = rsa.generate_private_key(public_exponent=65537, key_size
 public_key_of_server = private_key_of_server.public_key()   #Derive the public key from the private key.
 
 #We will save the server's public key into a PEM file.
-with open("public_key_of_server.pem", "wb") as public_key_file:
+with open("venv/public_key_of_server.pem", "wb") as public_key_file:
     public_key_file.write(public_key_of_server.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
 #and print the file name for clarification:
 print("The public key of the server is saved in this file: 'public_key_of_server.pem'.")

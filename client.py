@@ -36,14 +36,28 @@ def derive_aes_from_otp(otp):
     otp_bytes = otp.encode()
     derived_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"E2EE").derive(otp_bytes)
     return derived_key
-#Creat an encryptrd messaeg with HMAC
-def send_secure_message(message):
-    encrypted_and_send_message(client_socket, aes_key, hmac_key, message)
 
-    #send a message to the server
-    secure_message = "This is a secure message."
-    send_secure_message(secure_message)
-    print("An encrypted message is send")
+# This function creates HMAC for a given message using the provided key
+def create_hmac(message, hmac_key):
+    hmac_instance = hmac.HMAC(hmac_key, hashes.SHA256())
+    hmac_instance.update(message)
+    return hmac_instance.finalize()
+
+# This function encrypts messages with AES and sends them along with HMACפט
+def send_secure_message(client_socket, AES_key, hmac_key, message):
+    # Encrypt the message with AES using the encrypt_message function
+    encrypted_message = encrypt_message(message, AES_key)
+
+    # Create an HMAC of the encrypted message
+    hmac = create_hmac(encrypted_message, hmac_key)
+
+    # Prepare the data to send: the encrypted message and the HMAC
+    data_to_send = {"encrypted_message": encrypted_message, "hmac": hmac}
+
+    # Send the encrypted message and HMAC to the server
+    client_socket.sendall(json.dumps(data_to_send).encode())
+    print("An encrypted message has been sent.")
+
 
 #This function encrypts messages with AES:
 def encrypt_message(message, AES_key):

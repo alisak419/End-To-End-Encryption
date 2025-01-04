@@ -7,7 +7,6 @@ import json
 import socket
 import random
 
-
 #First of all, we will create a dictionary that will act as our database.
 #This database will store all the client's data, including public keys, pending messages, connection status.
 clients_data_base = {}

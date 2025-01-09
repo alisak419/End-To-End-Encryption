@@ -1,182 +1,182 @@
-import os
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import hashes, hmac
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
-import json
+
 import socket
+import threading
+import json
+import base64
+import time
 import random
 
-#First of all, we will create a dictionary that will act as our database.
-#This database will store all the client's data, including public keys, pending messages, connection status.
-clients_data_base = {}
 
-#We will define a local IP address. The client and the server will operate on the same computer.
-HOST = "127.0.0.1"
-PORT = 12345
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.backends import default_backend
 
-#Generate a pair of public and private keys for the server with the RSA algorithm.
-private_key_of_server = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-#The public exponent, 65537, is a prime number and is a standard choice for public exponent.
-#The key size 2048 is a large key size and offers a good security.
 
-public_key_of_server = private_key_of_server.public_key()   #Derive the public key from the private key.
+# Storage for clients, pending messages, and OTPs
+clients = {}  # Stores registered users (phone -> public key)
+pending_messages = {}  # Stores messages for offline users
+otp_storage = {}  # Stores OTPs mapped to phone numbers
+failed_attempts = {}  # Tracks failed OTP attempts
+OTP_EXPIRY_TIME = 60  # OTP validity in seconds
+MAX_ATTEMPTS = 3  # Maximum failed attempts before lockout
+active_users = set()
+def generate_otp():
+ """Generate a 6-digit OTP."""
+ return str(random.randint(100000, 999999))
 
-#We will save the server's public key into a PEM file.
-with open("venv/public_key_of_server.pem", "wb") as public_key_file:
-    public_key_file.write(public_key_of_server.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
-#and print the file name for clarification:
-print("The public key of the server is saved in this file: 'public_key_of_server.pem'.")
+#As the MMN requests, we will create a function that sends the OTP through a secure chanel.
+def SendBySecureChanel(phone_number, otp):
+  print(f"Sending OTP to {phone_number}: {otp}")
+  print("The otp send successfully")
 
-#Creating AES key for symmetric encryption:
-AES_key = os.urandom(32)    #using a key in size 256-bit
 
-#Defining a function that will do symmetric encryption: AES-CBC-256
-def encrypt_message(text):
-    iv = os.urandom(16) #initialization vector
-    cipher = Cipher(algorithms.AES(AES_key), modes.CBC(iv))
-    encryptor = cipher.encryptor()
-    text_with_padding = text + ' ' * (16 - len(text) % 16)  #padding
-    cipher_text = encryptor.update(text_with_padding.encode()) + encryptor.finalize()
-    return cipher_text + iv     #the final encrypted message
+def handle_client(client_socket, address):
+    global pending_messages, clients, otp_storage, failed_attempts, active_users
 
-#A function that decrypts the messages using AES-CBC-256:
-def decrypt_message(cipher_text):
-    iv = cipher_text[:16]
-    real_cipher_text = cipher_text[16:]
-    cipher = Cipher(algorithms.AES(AES_key), modes.CBC(iv))
-    decryptor = cipher.decryptor()
-    text = decryptor.update(real_cipher_text) + decryptor.finalize()
-    return text.decode().strip()
-
-#A function that generates HMAC, we will use a key derived from the AES key.
-def hmac_generator(message):
-    h = hmac.HMAC(AES_key, hashes.SHA256())
-    h.update(message)
-    return h.finalize()
-
-#Verify HMAC:
-def hmac_verifying(message, provided_hmac):
-    h = hmac.HMAC(AES_key, hashes.SHA256())
-    h.update(message)
+    print(f"[*] New client connected: {address}")
     try:
-        h.verify(provided_hmac)
-        return True
-    except:
-        return False
+        data = client_socket.recv(4096).decode()
+        if not data:
+            raise ValueError("Received empty data")
+        print(f"[INFO] Received data: {data}")
+        request = json.loads(data)
+        response = None
 
-#A function for sending an OTP via secure channel -
-#as MMN 16 says, we can assume already that the channel is secure.
-def SendBySecureChanel(client_id, otp):
-    print(f"The OTP '{otp} is sending securely to '{client_id}'.")
+        # Handle OTP request
+        if request['action'] == 'request_otp':
+            phone_number = request['phone_number']
 
-#This will be the main loop of code of the server.
-#Starting the server:
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:    #Creating a TCP socket.
-    server_socket.bind((HOST, PORT))    #binds the socket to the given IP and port for listening.
-    server_socket.listen()  #The server is in listening mode, meaning it's waiting for connections.
-    #We will print in what server the port is listening to maintain order:
-    print(f"The server is listening on {HOST}:{PORT}.")
+            # בדיקה האם המשתמש כבר מחובר
+            if phone_number in active_users:
+                response = {'status': 'error', 'message': 'User already connected'}
+            else:
+                otp = generate_otp()
+                otp_storage[phone_number] = {'otp': otp, 'timestamp': time.time()}
+                failed_attempts[phone_number] = 0
+                SendBySecureChanel(phone_number, otp)
+                response = {'status': 'otp_sent', 'otp': otp}
+                print(f"The OTP for {phone_number} was sent through secure chanel.")
 
-    #Now the server needs to accept the client's connections -
-    while True:
-        #The server will enter an infinite loop where he will listen and wait for incoming connections from the client.
-        #client_address contains the client's IP and port number.
-        #client_socket is the specific connection to the client.
-        client_socket, client_address = server_socket.accept()  #the client connects.
-        with client_socket:
-            print(f"connected by: {client_address}.")   #A message that indicated that the client is connected + his address.
-            #the client socket will be automatically closed when the block ends.
-            try:
-                received_data = client_socket.recv(4096)    #wait for client's data. 4096 - the number of bytes to read.
-                if not received_data:   #if the client disconnects, so end the loop for this client.
-                    continue
-                message = json.loads(received_data.decode())  # convert the data to a dictionary.
+        # Handle user registration with OTP
+        elif request['action'] == 'register':
+            phone_number = request['phone_number']
+            entered_otp = request['otp']
+            public_key = request['public_key']
 
-                # Check if the message is authentication
-                if message["type"] == "authentication":
-                    client_id = message["client_id"]
+            if phone_number in active_users:
+                response = {'status': 'error', 'message': 'User already connected'}
+            elif phone_number not in otp_storage:
+                response = {'status': 'error', 'message': 'OTP not requested'}
+            elif time.time() - otp_storage[phone_number]['timestamp'] > OTP_EXPIRY_TIME:
+                response = {'status': 'error', 'message': 'OTP expired'}
+                del otp_storage[phone_number]
+            elif failed_attempts[phone_number] >= MAX_ATTEMPTS:
+                response = {'status': 'error', 'message': 'Too many failed attempts'}
+            elif entered_otp != otp_storage[phone_number]['otp']:
+                failed_attempts[phone_number] += 1
+                response = {'status': 'error', 'message': 'Invalid OTP'}
+            else:
+                del otp_storage[phone_number]
+                clients[phone_number] = {'public_key': public_key}
+                if phone_number not in pending_messages:
+                    pending_messages[phone_number] = []
+                active_users.add(phone_number)
+                response = {'status': 'success'}
+                print(f"[*] User {phone_number} registered successfully")
 
-                    # use this function to receive ' verify and decode the message
-                    decrypted_message = receive_and_decrypt_message(client_socket, AES_key, AES_key)
+        # Retrieve a user's public key
+        elif request['action'] == 'get_public_key':
+            phone_number = request['phone_number']
+            print(f"[DEBUG] Retrieving public key for {phone_number}")
 
-                    if decrypted_message:
-                        print(f"Decrypted message: {decrypted_message}")
+            if phone_number in clients:
+                response = {'status': 'success', 'public_key': clients[phone_number]['public_key']}
+                print(f"[DEBUG] Found public key for {phone_number}")
+            else:
+                response = {'status': 'error', 'message': 'User not found'}
+                print(f"[DEBUG] User {phone_number} not found")
 
-                        # if the decoding succeed connect the user
-                        clients_data_base[client_id]["status"] = "connected"
-                        client_socket.sendall(b"Authentication successful, you are now connected.")
-                        print(f"client {client_id} has been authenticated and connected.")
-                    else:
-                        client_socket.sendall(b"Authentication failed. Invalid HMAC")
-                        print(f"Authentication failed for client {client_id}.")
+        # Handle send message
+        elif request['action'] == 'send_message':
+            sender = request['sender']
+            receiver = request['receiver']
+            encrypted_message = request.get('encrypted_message')
+            encrypted_aes_key = request.get('encrypted_aes_key')
 
-                #creating the structure of the data:
-                if message["type"] == "register":  #the type needs to be a registration request.
-                    client_id = message["client_id"]    #the phone number of the client
-                    public_key_pem = message["public_key"].encode() #the public key of the client
+            print(f"[DEBUG] Attempting to send message:")
+            print(f"[DEBUG] Sender: {sender}")
+            print(f"[DEBUG] Receiver: {receiver}")
+            print(f"[DEBUG] Current pending_messages before adding: {pending_messages}")
 
-                    #MMN16's requirment is that the server
-                    #won't contain more than 10 clients.
-                    if len(clients_data_base) >= 10:
-                        client_socket.sendall(b"Registration failed. Cause: server is full.")
-                        print(f"Sorry, client {client_id}. Your registration attempt rejected because the server is full.")
-                        continue
+            if not encrypted_message or not encrypted_aes_key:
+                response = {'status': 'error', 'message': 'Missing encrypted data'}
+            elif receiver not in clients:
+                response = {'status': 'error', 'message': 'Receiver not registered'}
+            else:
+                message_entry = {
+                    'sender': sender,
+                    'encrypted_message': encrypted_message,
+                    'encrypted_aes_key': encrypted_aes_key
+                }
 
-                    #Gnerating a random 6 character OTP:
-                    otp = ''.join(str(random.randint(0, 9)) for i in range(6))
-                    #Print the OTP:
-                    print(f"The OTP that was generated for {client_id} is: {otp}")
+                if receiver not in pending_messages:
+                    print(f"[DEBUG] Creating new message array for receiver {receiver}")
+                    pending_messages[receiver] = []
 
-                    #The OTP that we generated is sent through secure channel
-                    #using the function we created to the client:
-                    SendBySecureChanel(client_id, otp)
-                    client_socket.sendall(otp.encode())
-                    client_socket.sendall(b"The registration was successful!")
+                pending_messages[receiver].append(message_entry)
+                print(f"[DEBUG] Added message from {sender} to {receiver}")
+                print(f"[DEBUG] Message entry added: {message_entry}")
+                print(f"[DEBUG] Current pending messages after adding: {pending_messages}")
+                response = {'status': 'success', 'message': 'Message stored'}
 
-                    #here we will save the client's data to the dictionary we created at the beginning.
-                    #we will store the client's public key and the list of messages sent to this client:
-                    clients_data_base[client_id] = {"public_key": public_key_pem, "messages": [], "otp": otp}
+        # Handle fetch messages
+        elif request['action'] == 'fetch_messages':
+            phone_number = request['phone_number']
+            print(f"[DEBUG] Fetching messages for {phone_number}")
+            print(f"[DEBUG] Current pending messages: {pending_messages}")
 
-                    #save the public key to PEM file:
-                    with open(f"public_key_of_client_{client_id}.pem", "wb") as client_key_file:
-                        client_key_file.write(public_key_pem)
-
-                    print(f"The client that is registered: {client_id}")
-                    #confirming that the server processed the registration:
-                    client_socket.sendall(b"The registration is successful!")
-
-                #Checking the message type-"send_message" type is a type of message the client sends to the server.
-                elif message["type"] == "send_message":
-                    #extracting the details of the message:
-                    sender_id = message["sender_id"]
-                    receiver_id = message["receiver_id"]
-                    text_message = message["message"]
-
-                    #checking if the client exists in the server's data base:
-                    if receiver_id in clients_data_base:
-                        # the client exists. The message is saved in the receiver's message queue.
-                        #The message is added to the receiver's list of pending messages:
-                        clients_data_base[receiver_id]["messages"].append({"from":sender_id, "message":text_message})
-                        client_socket.sendall(b"The message is sent.")
-                        #A confirmation is sent to the client to acknowledge that the delivery was succesful:
-                        print(f"The message is sent from {sender_id} to {receiver_id} and is stored!")
-
-                    else:       #the receiver doesn't exist.
-                        client_socket.sendall(b"The receiver was not found...")
-                        #The sender receives a respond that the receiver was not found:
-                        print(f"Failed to send message from {sender_id} to {receiver_id}: receiver not found.")
-
-
-                #In the case that the received message isn't recognized - the server will print it:
+            if phone_number not in clients:
+                response = {'status': 'error', 'message': 'User not registered'}
+            else:
+                messages = pending_messages.get(phone_number, [])
+                if messages:
+                    print(f"[DEBUG] Found {len(messages)} messages for {phone_number}")
+                    print(f"[DEBUG] Messages content: {messages}")
+                    response = {'status': 'success', 'messages': messages}
+                    pending_messages[phone_number] = []  # Clear after sending
                 else:
-                    client_socket.sendall(b"The request is unknown!")
+                    print(f"[DEBUG] No messages found for {phone_number}")
+                    response = {'status': 'no_messages'}
 
-            #error handling:
-            except Exception as e:
-                print(f"Exception occured: {e}")
+        if response:
+            client_socket.send(json.dumps(response).encode())
+        else:
+            client_socket.send(json.dumps({'status': 'error', 'message': 'Unknown request'}).encode())
+
+    except json.JSONDecodeError:
+        print(f"[!] Error with client {address}: Invalid JSON received")
+        client_socket.send(json.dumps({'status': 'error', 'message': 'Invalid JSON'}).encode())
+    except Exception as e:
+        print(f"[!] Error with client {address}: {str(e)}")
+        client_socket.send(json.dumps({'status': 'error', 'message': str(e)}).encode())
+        if 'request' in locals() and 'phone_number' in request:
+            active_users.discard(request['phone_number'])
+    finally:
+        if 'request' in locals() and 'phone_number' in request:
+            active_users.discard(request['phone_number'])
+        client_socket.close()
 
 
+def start_server():
+ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+ server.bind(('0.0.0.0', 9999))
+ server.listen(10)
+ print("[*] Server is ready to accept connections...")
 
+ while True:
+     client_socket, addr = server.accept()
+     client_thread = threading.Thread(target=handle_client, args=(client_socket, addr))
+     client_thread.start()
 
-
+if __name__ == "__main__":
+ start_server()

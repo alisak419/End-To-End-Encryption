@@ -120,6 +120,11 @@ def handle_client(client_socket, address):
             entered_otp = request['otp']
             public_key = request['public_key']
 
+            if phone_number in active_users:
+                response = {'status': 'error', 'message': 'User already connected'}
+                print(f"[!] User {phone_number} is already connected from another device")
+                return
+
             # OTP check
             if phone_number not in otp_storage:
                 response = {'status': 'error', 'message': 'OTP not requested'}

@@ -98,40 +98,65 @@ def load_private_key(private_pem):
  )
 
 """
-Requests a one-time password (OTP) from the server.
+Requests an OTP from the server.
 
-Args:
-    phone_number (str): The target phone number.
 Returns:
-    str or None: The OTP if successful, otherwise None.
+     the OTP and its signature if successful, None otherwise.
 """
+
+
 def request_otp(phone_number):
     try:
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.connect((SERVER_IP, SERVER_PORT))
+
+        # Send request
         request = json.dumps({'action': 'request_otp', 'phone_number': phone_number})
         client.send(request.encode())
-        raw_response = client.recv(4096).decode()
 
-        #The first time, before we have the server's key, we'll just get the answer
+        # Receive and parse response
+        raw_response = client.recv(4096).decode()
         response = json.loads(raw_response)
-        # If there is a signature, we will try to verify if we already have the key
-        if 'signature' in response and 'SERVER_PUBLIC_KEY' in globals():
-            response = verify_server_response(raw_response)
-            if response is None:
-                raise ValueError("Server verification failed!")
-        else:
-            response = response.get('data', response)
+
+        # Handle signed response
+        if 'data' in response and 'signature' in response:
+            response = response['data']
 
         client.close()
 
-        if response.get('status') == 'otp_sent' and 'otp' in response:
-            return response['otp']
+        if response.get('status') == 'otp_sent':
+            # Store server's public key for future verification
+            global SERVER_PUBLIC_KEY
+            SERVER_PUBLIC_KEY = serialization.load_pem_public_key(
+                response['server_public_key'].encode(),
+                backend=default_backend()
+            )
+
+            print("[*] Server's public key received and stored")
+
+            # Encrypt the OTP with server's public key
+            encrypted_otp = SERVER_PUBLIC_KEY.encrypt(
+                response['otp'].encode(),
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+
+            return {
+                'otp': response['otp'],
+                'encrypted_otp': base64.b64encode(encrypted_otp).decode(),
+                'signature': response['otp_signature']
+            }
         else:
-            print("ERROR! oh no, failed to retrieve OTP from server.")
+            print(f"[!] Server response status: {response.get('status')}")
+            print(f"[!] Server message: {response.get('message', 'No message provided')}")
             return None
+
     except Exception as e:
-        print(f"Error {str(e)}")
+        print(f"[!] Error in request_otp: {str(e)}")
+        print(f"[!] Raw response was: {raw_response if 'raw_response' in locals() else 'No response received'}")
         return None
 
 """
@@ -144,23 +169,31 @@ Args:
 Returns:
     dict: The server's response containing the registration status.
 """
-def register_client(phone_number, otp, public_key):
+def register_client(phone_number, otp_data, public_key):
     try:
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.connect((SERVER_IP, SERVER_PORT))
-        request = json.dumps({'action': 'register', 'phone_number': phone_number, 'otp': otp, 'public_key': public_key})
+
+        # Send back the encrypted OTP with its signature
+        request = json.dumps({
+            'action': 'register',
+            'phone_number': phone_number,
+            'encrypted_otp': otp_data['encrypted_otp'],  # Send encrypted OTP instead of plaintext
+            'otp_signature': otp_data['signature'],
+            'public_key': public_key
+        })
+
         client.send(request.encode())
         raw_response = client.recv(4096).decode()
-
-        # The first time we will just accept the answer as it is
-        response = json.loads(raw_response)
-        if 'data' in response:
-            response = response['data']
-
+        response = verify_server_response(raw_response)
         client.close()
+
+        if response is None:
+            raise ValueError("Server response verification failed!")
+
         return response
     except Exception as e:
-        print(f"Error {str(e)}")
+        print(f"Error: {str(e)}")
         return {'status': 'error', 'message': str(e)}
 
 """
@@ -415,79 +448,99 @@ if __name__ == "__main__":
     print("\n=== Secure Messaging Client ===")
     phone_number = input("Enter your phone number: ").strip()
 
-    # Generating/loading keys
+    # Step 1: Key Generation
     print("\n[*] Security Step 1 - Key Generation:")
     private_pem, public_pem = load_keys_from_file(phone_number)
     if not private_pem or not public_pem:
         private_pem, public_pem = generate_rsa_keys()
         save_keys_to_file(phone_number, private_pem, public_pem)
         print(f"Created new RSA-2048 key pair for {phone_number}")
-        print(f"Public Key Hash: {hashlib.sha256(public_pem).hexdigest()[:8]}")
     else:
         print(f"Loaded existing key pair for {phone_number}")
-        print(f"Public Key Hash: {hashlib.sha256(public_pem).hexdigest()[:8]}")
+    print(f"Public Key Hash: {hashlib.sha256(public_pem).hexdigest()[:8]}")
 
-    # Receiving a verification code
+    # Step 2: Request and Verify OTP
     print("\n[*] Security Step 2 - Authentication:")
-    otp = request_otp(phone_number)
-    if otp:
-        print(f"Authentication code generated: {otp}")
+    otp_data = request_otp(phone_number)
 
-        # Identity Verification and Server Key Reception
-        print("\n[*] Security Step 3 - Identity Verification:")
-        registration_response = register_client(phone_number, otp, public_pem.decode())
+    if otp_data:
+        print("[*] Received signed OTP from server")
+        try:
+            # Verify OTP signature with server's public key
+            SERVER_PUBLIC_KEY.verify(
+                base64.b64decode(otp_data['signature']),
+                otp_data['otp'].encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            print("[*] OTP signature verified successfully")
 
-        if registration_response.get('status') == 'success':
-            print("Identity verified successfully")
-
-            # Initialize server's public key from registration response
-            SERVER_PUBLIC_KEY = serialization.load_pem_public_key(
-                registration_response['server_public_key'].encode(),
-                backend=default_backend()
+            # Step 3: Register with verified OTP
+            print("\n[*] Security Step 3 - Identity Verification:")
+            registration_response = register_client(
+                phone_number,
+                otp_data,
+                public_pem.decode()
             )
 
-            print("Server's public key received successfully")
+            if registration_response.get('status') == 'success':
+                print("[*] Identity verified successfully")
 
-            # Summary of operations
-            print("\n=== Final Security Report ===")
-            print("1. Key Generation:")
-            print(f"   - RSA-2048 Keys: {hashlib.sha256(public_pem).hexdigest()[:8]}")
-            print("   - Keys saved locally")
-            print("\n2. Authentication:")
-            print(f"   - OTP Generated: {otp}")
-            print("   - OTP Verified: ✓")
-            print("\n3. Connection Security:")
-            print("   - Session established")
-            print("   - Server verified")
-            print("   - Ready for encrypted communication")
-            print("\nAll security measures implemented successfully!")
-        else:
-            print(f"Verification failed: {registration_response.get('message')}")
-            exit()
+                # Summary of operations
+                print("\n=== Final Security Report ===")
+                print("1. Key Generation:")
+                print(f"   - RSA-2048 Keys: {hashlib.sha256(public_pem).hexdigest()[:8]}")
+                print("   - Keys saved locally")
+                print("\n2. Authentication:")
+                print("   - OTP Signature Verified")
+                print("   - OTP Authentication: ✓")
+                print("\n3. Connection Security:")
+                print("   - Session established")
+                print("   - Server verified")
+                print("   - Ready for encrypted communication")
+                print("\nAll security measures implemented successfully!")
+
+                # Main messaging loop
+                while True:
+                    print("\nSelect an action:")
+                    print("1 - Send a message")
+                    print("2 - Fetch messages")
+                    print("3 - Disconnect and Exit")
+
+                    try:
+                        action = input("Enter your choice (1/2/3): ").strip()
+
+                        if action == "1":
+                            receiver = input("Enter receiver's phone number: ").strip()
+                            message = input("Type your message: ").strip()
+                            send_message(phone_number, receiver, message)
+                        elif action == "2":
+                            fetch_messages(phone_number, private_pem)
+                        elif action == "3":
+                            disconnect(phone_number)
+                            print("Disconnected successfully")
+                            print("Exiting...")
+                            break
+                        else:
+                            print("Invalid choice. Please enter 1, 2, or 3.")
+                    except Exception as e:
+                        print(f"Error during operation: {str(e)}")
+                        choice = input("Do you want to try again? (y/n): ").strip().lower()
+                        if choice != 'y':
+                            disconnect(phone_number)
+                            print("Disconnected due to error")
+                            break
+            else:
+                print(f"[!] Registration failed: {registration_response.get('message')}")
+                exit(1)
+        except Exception as e:
+            print(f"[!] Failed to verify OTP signature: {str(e)}")
+            exit(1)
     else:
-        print("Authentication failed")
-        exit()
-
-    # Main message loop
-    while True:
-        print("\nSelect an action:")
-        print("1 - Send a message")
-        print("2 - Fetch messages")
-        print("3 - Disconnect and Exit")
-
-        action = input("Enter your choice (1/2/3): ").strip()
-
-        if action == "1":
-            receiver = input("Enter receiver's phone number: ").strip()
-            message = input("Type your message: ").strip()
-            send_message(phone_number, receiver, message)
-        elif action == "2":
-            fetch_messages(phone_number, private_pem)
-        elif action == "3":
-            disconnect(phone_number)
-            print("Exiting...")
-            break
-        else:
-            print("Invalid choice. Please enter 1, 2, or 3.")
+        print("[!] Failed to receive OTP from server")
+        exit(1)
 
 

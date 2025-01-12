@@ -91,15 +91,13 @@ Processes various client actions, including:
 Returns:
     None
 """
+
+
 def handle_client(client_socket, address):
     global pending_messages, clients, otp_storage, failed_attempts, active_users
 
-    print(f"[*] New client connected: {address}")
     try:
         data = client_socket.recv(4096).decode()
-        if not data:
-            raise ValueError("Received empty data")
-        print(f"[INFO] Received data: {data}")
         request = json.loads(data)
         response = None
 
@@ -107,25 +105,73 @@ def handle_client(client_socket, address):
         if request['action'] == 'request_otp':
             phone_number = request['phone_number']
 
+            # Generate OTP
             otp = generate_otp()
             otp_storage[phone_number] = {'otp': otp, 'timestamp': time.time()}
             failed_attempts[phone_number] = 0
-            SendBySecureChanel(phone_number, otp)
-            response = {'status': 'otp_sent', 'otp': otp}
-            print(f"The OTP for {phone_number} was sent through secure channel.")
 
-            # Handle user registration/reconnection with OTP
+            # Sign the OTP with server's private key
+            signature = base64.b64encode(
+                SERVER_PRIVATE_KEY.sign(
+                    otp.encode(),
+                    padding.PSS(
+                        mgf=padding.MGF1(hashes.SHA256()),
+                        salt_length=padding.PSS.MAX_LENGTH
+                    ),
+                    hashes.SHA256()
+                )
+            ).decode()
+
+            # Send signed OTP along with server's public key
+            response = {
+                'status': 'otp_sent',
+                'otp': otp,
+                'otp_signature': signature,
+                'server_public_key': SERVER_PUBLIC_PEM.decode()
+            }
+            print(f"Signed OTP sent to {phone_number}")
+
+        # Handle user registration
         elif request['action'] == 'register':
             phone_number = request['phone_number']
-            entered_otp = request['otp']
+            encrypted_otp = request['encrypted_otp']
+            signature = request['otp_signature']
             public_key = request['public_key']
 
             if phone_number in active_users:
                 response = {'status': 'error', 'message': 'User already connected'}
-                print(f"[!] User {phone_number} is already connected from another device")
                 return
 
-            # OTP check
+            # Decrypt the OTP using server's private key
+            try:
+                decrypted_otp = SERVER_PRIVATE_KEY.decrypt(
+                    base64.b64decode(encrypted_otp),
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                ).decode()
+            except Exception:
+                response = {'status': 'error', 'message': 'Invalid encrypted OTP'}
+                return
+
+            # Verify OTP signature
+            try:
+                SERVER_PUBLIC_KEY.verify(
+                    base64.b64decode(signature),
+                    decrypted_otp.encode(),
+                    padding.PSS(
+                        mgf=padding.MGF1(hashes.SHA256()),
+                        salt_length=padding.PSS.MAX_LENGTH
+                    ),
+                    hashes.SHA256()
+                )
+            except Exception:
+                response = {'status': 'error', 'message': 'Invalid OTP signature'}
+                return
+
+            # Standard OTP validations
             if phone_number not in otp_storage:
                 response = {'status': 'error', 'message': 'OTP not requested'}
                 return
@@ -139,24 +185,28 @@ def handle_client(client_socket, address):
                 response = {'status': 'error', 'message': 'Too many failed attempts'}
                 return
 
-            if entered_otp != otp_storage[phone_number]['otp']:
+            # Verify OTP
+            if decrypted_otp != otp_storage[phone_number]['otp']:
                 failed_attempts[phone_number] += 1
                 response = {'status': 'error', 'message': 'Invalid OTP'}
                 return
 
-            # Remove a user from active_users if he is there for some reason
+            # Cleanup
             active_users.discard(phone_number)
             del otp_storage[phone_number]
 
-            # Checking if this is an existing user
+            # Handle existing user
             if phone_number in clients:
                 stored_public_key = clients[phone_number]['public_key']
+                if phone_number in active_users:
+                    print(f"[!] User {phone_number} is already connected. Rejecting new connection attempt.")
+                    response = {'status': 'error', 'message': 'User already connected'}
+                    return
                 if public_key != stored_public_key:
                     print(f"[!] Key mismatch for {phone_number}")
                     response = {'status': 'error', 'message': 'Invalid public key for existing user'}
                     return
 
-                # Only if everything is fine - add to active_users
                 active_users.add(phone_number)
                 response = {
                     'status': 'success',
@@ -169,7 +219,6 @@ def handle_client(client_socket, address):
                 clients[phone_number] = {'public_key': public_key}
                 if phone_number not in pending_messages:
                     pending_messages[phone_number] = []
-                #Only if everything is fine - add to active_users
                 active_users.add(phone_number)
                 response = {
                     'status': 'success',
@@ -232,17 +281,17 @@ def handle_client(client_socket, address):
                 else:
                     response = {'status': 'no_messages'}
 
+        # Handle get server key request
         elif request['action'] == 'get_server_key':
-            # Send the public key without a signature
             response = {
                 'status': 'success',
                 'server_public_key': SERVER_PUBLIC_PEM.decode()
             }
             client_socket.send(json.dumps(response).encode())
-            return  # Leaving the function because this is a special case
+            return  # Special case - we return immediately
 
+        # Send signed response for all other cases
         if response:
-            # Instead of sending the answer directly
             signed_response = {
                 'data': response,
                 'signature': base64.b64encode(
@@ -258,6 +307,7 @@ def handle_client(client_socket, address):
             }
             client_socket.send(json.dumps(signed_response).encode())
 
+
     except json.JSONDecodeError:
         print(f"[!] Error with client {address}: Invalid JSON received")
         client_socket.send(json.dumps({'status': 'error', 'message': 'Invalid JSON'}).encode())
@@ -268,6 +318,8 @@ def handle_client(client_socket, address):
             active_users.discard(request['phone_number'])
     finally:
         client_socket.close()
+
+
 """
 Starts the server and listens for incoming connections.
 Creates a socket, binds it to port 9999, and begins listening for clients.

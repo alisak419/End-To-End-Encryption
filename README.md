@@ -1,4 +1,5 @@
-Hello this project is a  secure communication system using RSA, AES, and HMAC encryption techniques, implementing client-server architecture with OTP-based authentication.
+Hello,
+this project is a  secure communication system using RSA, AES, and HMAC encryption techniques, implementing client-server architecture with OTP-based authentication.
 
 Features:
 End-to-End Encryption – Ensures secure data transmission using AES encryption.
